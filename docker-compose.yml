@@ -483,6 +483,39 @@ services:
     networks:
       network:
         ipv4_address: 10.5.0.125
+        
+  supercluster:
+    build:
+      context: ../supercluster/dataspace-service
+      dockerfile: Dockerfile
+    image: supercluster
+    container_name: supercluster
+    restart: on-failure
+    environment:
+      - NATS_ADDRESS=${NATS_HOSTNAME}:${NATS_PORT}
+      - SUPERCLUSTER_ETCD_ADDRESS=${SUPERCLUSTER_ETCD_ADDRESS}
+      - MERIDIAN_ADDRESS=${MERIDIAN_ADDRESS}
+      - SUPERCLUSTER_LISTEN_PORT=${SUPERCLUSTER_LISTEN_PORT}
+    ports:
+      - ${SUPERCLUSTER_LISTEN_PORT}:${SUPERCLUSTER_LISTEN_PORT}
+    networks:
+      network:
+        ipv4_address: 10.5.0.126
+    depends_on:
+      - nats
+      - supercluster_etcd
+      
+  supercluster_etcd:
+    image: 'bitnami/etcd:latest'
+    container_name: supercluster_etcd
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://${SUPERCLUSTER_ETCD_ADDRESS}
+    volumes:
+      - supercluster_etcd_data:/bitnami/etcd
+    networks:
+      network:
+        ipv4_address: 10.5.0.127
 
 networks:
   network:
@@ -512,4 +545,6 @@ volumes:
   meridian_neo4j_logs:
     driver: local
   pulsar_etcd_data:
+    driver: local
+  supercluster_etcd_data:
     driver: local
