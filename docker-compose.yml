@@ -18,6 +18,8 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - MERIDIAN_ADDRESS=${MERIDIAN_ADDRESS}
       - GRAVITY_ADDRESS=${GRAVITY_ADDRESS}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.101
@@ -39,6 +41,8 @@ services:
       - NEO4J_DBNAME=${NEO4J_DBNAME}
       - NATS_HOSTNAME=${NATS_HOSTNAME}
       - NATS_PORT=${NATS_PORT}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.102
@@ -69,6 +73,8 @@ services:
       - ETCD_ADDRESS=${KUIPER_ETCD_HOSTNAME}:${KUIPER_ETCD_PORT}
       - SECRET_KEY=${SECRET_KEY}
       - MERIDIAN_ADDRESS=${MERIDIAN_ADDRESS}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.103
@@ -90,6 +96,8 @@ services:
       - NATS_ADDRESS=${NATS_HOSTNAME}:${NATS_PORT}
       - SECRET_KEY=${SECRET_KEY}
       - MERIDIAN_ADDRESS=${MERIDIAN_ADDRESS}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.104
@@ -112,6 +120,7 @@ services:
     environment:
       GRPC_PORT: ${AGENT_QUEUE_PORT}
       NATS_CONN_ADDRESS: ${NATS_HOSTNAME}:${NATS_PORT}
+      JAEGER_ADDRESS: ${JAEGER_HOST}:${JAEGER_GRPC_PORT}
       SECRET_KEY: ${SECRET_KEY}
     depends_on:
       - nats
@@ -139,6 +148,8 @@ services:
       - APOLLO_DB_CONSISTENCY=${APOLLO_DB_CONSISTENCY}
       - APOLLO_DB_KEYSPACE=${APOLLO_DB_KEYSPACE}
       - APOLLO_DB_CLUSTER=${APOLLO_DB_CLUSTER}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.106
@@ -157,6 +168,7 @@ services:
     container_name: vault
     hostname: ${VAULT_HOSTNAME}
     restart: on-failure
+    platform: linux/amd64
     environment:
       - VAULT_ADDR=${VAULT_ADDR}:${VAULT_HTTP_PORT}
       - VAULT_API_ADDR=${VAULT_ADDR}:${VAULT_HTTP_PORT}
@@ -228,7 +240,8 @@ services:
         ipv4_address: 10.5.0.113
 
   etcd:
-    image: "bitnami/etcd:latest"
+    image: bitnamilegacy/etcd:3.6.4-debian-12-r4
+    platform: linux/amd64
     container_name: etcd
     hostname: ${ETCD_HOSTNAME}
     environment:
@@ -241,7 +254,8 @@ services:
         ipv4_address: 10.5.0.110
 
   kuiper_etcd:
-    image: "bitnami/etcd:latest"
+    image: bitnamilegacy/etcd:3.6.4-debian-12-r4
+    platform: linux/amd64
     container_name: kuiper_etcd
     hostname: ${KUIPER_ETCD_HOSTNAME}
     environment:
@@ -254,7 +268,8 @@ services:
         ipv4_address: 10.5.0.111
 
   quasar_etcd:
-    image: "bitnami/etcd:latest"
+    image: bitnamilegacy/etcd:3.6.4-debian-12-r4
+    platform: linux/amd64
     container_name: quasar_etcd
     hostname: ${QUASAR_ETCD_HOSTNAME}
     environment:
@@ -291,7 +306,8 @@ services:
       - rate_limiter_service
 
   consul:
-    image: hashicorp/consul:latest
+    image: hashicorp/consul:1.17.1
+    platform: linux/amd64
     hostname: consul
     ports:
       - "8500:8500"
@@ -319,6 +335,8 @@ services:
     environment:
       - DB_CONSUL=${DB_CONSUL}
       - DBPORT_CONSUL=${DBPORT_CONSUL}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     networks:
       network:
         ipv4_address: 10.5.0.116
@@ -342,6 +360,8 @@ services:
       - LISTEN_ADDRESS=0.0.0.0:${MERIDIAN_LISTEN_PORT}
       - NATS_ADDRESS=${NATS_HOSTNAME}:${NATS_PORT}
       - SECRET_KEY=${SECRET_KEY}
+      - JAEGER_HOST=${JAEGER_HOST}
+      - JAEGER_GRPC_PORT=${JAEGER_GRPC_PORT}
     depends_on:
       meridian_neo4j:
         condition: service_healthy
@@ -390,7 +410,8 @@ services:
         ipv4_address: 10.5.0.119
 
   pulsar_etcd:
-    image: 'bitnami/etcd:latest'
+    image: bitnamilegacy/etcd:3.6.4-debian-12-r4
+    platform: linux/amd64
     container_name: pulsar_etcd
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
@@ -462,7 +483,7 @@ services:
     privileged: true
     restart: unless-stopped
     volumes:
-      - '/:/host:ro,rslave'
+      - './node_exporter_data:/host:ro'
     networks:
       network:
         ipv4_address: 10.5.0.124
@@ -483,6 +504,23 @@ services:
     networks:
       network:
         ipv4_address: 10.5.0.125
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.43
+    container_name: jaeger
+    hostname: jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_GRPC_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "${JAEGER_GRPC_PORT}:${JAEGER_GRPC_PORT}"   
+    networks:
+      network:
+        ipv4_address: 10.5.0.200
 
 networks:
   network:
