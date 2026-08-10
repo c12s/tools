@@ -283,7 +283,7 @@ services:
       - CONSUL_LOCAL_CONFIG={"server":true,"server_rejoin_age_max":"8760h"}
     command: "agent -ui -server -bind 0.0.0.0 -client 0.0.0.0 -bootstrap-expect 1"
     volumes:
-      - ./heliosphere/consul:/consul/data
+      - consul_data:/consul/data
     networks:
       - network
 
@@ -453,4 +453,6 @@ volumes:
   meridian_neo4j_logs:
     driver: local
   pulsar_etcd_data:
+    driver: local
+  consul_data:
     driver: local
