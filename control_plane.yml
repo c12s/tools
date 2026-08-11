@@ -273,7 +273,7 @@ services:
       - rate_limiter_service
 
   consul:
-    image: hashicorp/consul:1.21.5
+    image: hashicorp/consul:latest
     hostname: consul
     ports:
       - "8500:8500"
@@ -418,7 +418,7 @@ services:
       - network
 
   prometheus_healthcheck:
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:latest
     volumes:
       - ./prometheus_healthcheck/prometheus.yml:/etc/prometheus/prometheus.yml
     command:

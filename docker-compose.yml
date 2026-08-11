@@ -289,7 +289,7 @@ services:
       - rate_limiter_service
 
   consul:
-    image: hashicorp/consul:1.21.5
+    image: hashicorp/consul:latest
     hostname: consul
     ports:
       - "8500:8500"
@@ -438,7 +438,7 @@ services:
         ipv4_address: 10.5.0.122
 
   prometheus_healthcheck:
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:latest
     volumes:
       - ./prometheus_healthcheck/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
@@ -451,7 +451,7 @@ services:
         ipv4_address: 10.5.0.123
 
   node_exporter:
-    image: quay.io/prometheus/node-exporter:v1.12.1
+    image: quay.io/prometheus/node-exporter:latest
     container_name: node_exporter
     command:
       - '--path.rootfs=/host'
