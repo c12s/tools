@@ -1,0 +1,19 @@
+[Unit]
+Description=c12s Star node agent
+Documentation=https://github.com/c12s/star
+# cloud-config.service runs after cloud-init has written the per-node
+# /var/lib/c12s/node.env on first boot
+After=network-online.target cloud-config.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# image defaults first, then per-node values; a key set in both: the later file wins
+EnvironmentFile=-/usr/lib/c12s/node.env
+EnvironmentFile=-/var/lib/c12s/node.env
+ExecStart=/usr/local/bin/star
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

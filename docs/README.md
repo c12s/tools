@@ -84,6 +84,24 @@ The control plane is available at [http://localhost:5555](http://localhost:5555)
 
 The node agents are available on ports specified in the configuration file. The default port number for the first node agent is 11000. As the agents expose a gRPC API, [gRPCurl](https://github.com/fullstorydev/grpcurl) or Postman can be used for interaction.
 
+### Authentication
+
+All protected endpoints expect the token returned by `POST /apis/core/v1/auth` in the `Authorization` header, prefixed with `Bearer`:
+
+```
+Authorization: Bearer hvs.CAESICIm77HTJaOAzZFMb6EtxkQix0d85P1jFaR7tPadmgK6Gh4KHGh2cy5zTjVSV2NmZnZJV28zdTVXSDhWT24xVGQ
+```
+
+A typical workflow:
+
+1. Register a user (`POST /users`) — this also creates the organization.
+2. Login (`POST /auth`) to obtain a token. Tokens expire (default TTL is 30 minutes) — re-login when you receive 401.
+3. List available nodes (`GET /nodes/available`).
+4. Claim nodes for the organization (`PATCH /nodes`) — this also creates the `default` namespace for the org.
+5. Create a schema (`POST /schemas`), then a configuration (`POST /configs/standalone`) validated against it.
+6. Disseminate the configuration to query-selected nodes (`POST /configs/standalone/placements`).
+7. Check placement task statuses (`GET /configs/standalone/placements`).
+
 ## Endpoints
 
 ### POST /apis/core/v1/users
@@ -225,7 +243,7 @@ The endpoint for listing all nodes owned by an organization.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -342,7 +360,7 @@ The endpoint for querying nodes owned by an organization.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -413,7 +431,7 @@ The endpoint for allocating nodes. The available nodes matched by the query sele
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -478,13 +496,59 @@ The endpoint for allocating nodes. The available nodes matched by the query sele
 
  - Invalid query format
 
+### DELETE /apis/core/v1/nodes
+
+The endpoint for deleting a node record. It removes the record, its label
+index, its liveness state and its desired OS image. Org-owned nodes are never
+removed automatically by the control plane (the GC only reaps stale *pool*
+records), so this is the explicit path for them. Deleting a host does not
+stop the VMs it declared — they keep running and keep their own records.
+
+Node listings additionally expose the read-time liveness view:
+`lastSeen` (unix seconds of the last heartbeat; `0` = never) and `liveness`
+(`online` | `stale` | `offline` | `unknown`, thresholds from Magnetar's
+`NODE_STALE_AFTER` / `NODE_OFFLINE_AFTER`).
+
+#### Request headers
+
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
+
+#### Request body
+
+```json
+{
+	"nodeId": "05ede011-701e-4e9c-b500-f3b6a98a7564"
+}
+```
+|property| type  |  description |
+|-----|-----|----|
+| `nodeId` | string  | The unique identifier of the node to delete. |
+
+#### Response - 200 OK
+
+```json
+{}
+```
+
+#### Response - 401 Unauthorized
+
+ - Invalid authentication token
+
+#### Response - 403 Forbidden
+
+ - The caller lacks the `node.delete` permission on the node
+
+#### Response - 404 Not Found
+
+ - No node with that id
+
 ### POST /apis/core/v1/labels/float64
 
 The endpoint for upserting a label for the specified node. The label has a float64 value. The node must be owned by the specified organization.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -556,7 +620,7 @@ The endpoint for upserting a label for the specified node. The label has a boole
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -628,7 +692,7 @@ The endpoint for upserting a label for the specified node. The label has a strin
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -700,7 +764,7 @@ The endpoint for deleting a label for the specified node. The node must be owned
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -763,7 +827,7 @@ The endpoint for creating security policy inheritance relationships between reso
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -804,7 +868,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -856,7 +920,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -864,6 +928,7 @@ The endpoint for creating security policies.
 {
 	"schema_details": {
 		"organization": "c12s",
+		"namespace": "default",
 		"schema_name": "schema",
 		"version": "v1.0.2"
 	},
@@ -874,6 +939,7 @@ The endpoint for creating security policies.
 |-----|-----|----|
 | `schema_details`    | object  | Schema info. |
 | `schema_details.organization`    | string  | The owner of the schema. |
+| `schema_details.namespace`    | string  | Namespace the schema belongs to. |
 | `schema_details.schema_name`    | string  | Schema name. |
 | `schema_details.version`    | string | Schema version. New schema version will be saved only if it doesn't already exist. |
 | `schema`    | string | Schema definition. Must be a valid YAML representation of a JSON schema. |
@@ -905,7 +971,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -913,6 +979,7 @@ The endpoint for creating security policies.
 {
 	"schema_details": {
 		"organization": "c12s",
+		"namespace": "default",
 		"schema_name": "schema",
 		"version": "v1.0.2"
 	}
@@ -922,6 +989,7 @@ The endpoint for creating security policies.
 |-----|-----|----|
 | `schema_details`    | object  | Schema info. |
 | `schema_details.organization`    | string  | The owner of the schema. |
+| `schema_details.namespace`    | string  | Namespace the schema belongs to. |
 | `schema_details.schema_name`    | string  | Schema name. |
 | `schema_details.version`    | string | Schema version. New schema version will be saved only if it doesn't already exist. |
 
@@ -957,7 +1025,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -965,6 +1033,7 @@ The endpoint for creating security policies.
 {
 	"schema_details": {
 		"organization": "c12s",
+		"namespace": "default",
 		"schema_name": "schema",
 	}
 }
@@ -973,6 +1042,7 @@ The endpoint for creating security policies.
 |-----|-----|----|
 | `schema_details`    | object  | Schema info. |
 | `schema_details.organization`    | string  | The owner of the schema. |
+| `schema_details.namespace`    | string  | Namespace the schema belongs to. |
 | `schema_details.schema_name`    | string  | Schema name. |
 
 #### Response - 200 OK
@@ -1021,7 +1091,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1029,6 +1099,7 @@ The endpoint for creating security policies.
 {
 	"schema_details": {
 		"organization": "c12s",
+		"namespace": "default",
 		"schema_name": "schema",
 		"version": "v1.0.2"
 	}
@@ -1038,6 +1109,7 @@ The endpoint for creating security policies.
 |-----|-----|----|
 | `schema_details`    | object  | Schema info. |
 | `schema_details.organization`    | string  | The owner of the schema. |
+| `schema_details.namespace`    | string  | Namespace the schema belongs to. |
 | `schema_details.schema_name`    | string  | Schema name. |
 | `schema_details.version`    | string | Schema version. |
 
@@ -1066,7 +1138,7 @@ The endpoint for creating security policies.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1074,6 +1146,7 @@ The endpoint for creating security policies.
 {
   "schema_details": {
     "organization": "c12s",
+    "namespace": "default",
     "schema_name": "schema",
     "version": "v1.0.1"
   },
@@ -1084,6 +1157,7 @@ The endpoint for creating security policies.
 |-----|-----|----|
 | `schema_details`    | object  | Schema info. |
 | `schema_details.organization`    | string  | The owner of the schema. |
+| `schema_details.namespace`    | string  | Namespace the schema belongs to. |
 | `schema_details.schema_name`    | string  | Schema name. |
 | `schema_details.version`    | string | Schema version. |
 | `configuration`    | string  | Configuration in YAML format. |
@@ -1150,7 +1224,7 @@ The endpoint for creating new standalone configuration version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1187,6 +1261,15 @@ The endpoint for creating new standalone configuration version.
 | `schema` | object | **[optional]** Schema against which to validate the new configuration. |
 | `schema.name` | string | **[optional]** Schema name. |
 | `schema.version` | string | **[optional]** Schema version. |
+
+**Note on schema validation:** the configuration is validated as YAML of the shape:
+
+```yaml
+<config_name>:
+  <paramSet.key>: <paramSet.value>
+```
+
+i.e. the configuration name is the root key of the validated document. The JSON schema must reflect this — e.g. for a config named `nats_config` with params `port` and `address`, the schema root must contain a `nats_config` object property with the param fields inside it.
 
 #### Response - 200 OK
 
@@ -1236,7 +1319,7 @@ The endpoint for getting a specified standalone configuration version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1301,7 +1384,7 @@ The endpoint for listing all standalone configurations inside an organization.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1363,7 +1446,7 @@ The endpoint for deleting a specified standalone configuration version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1428,7 +1511,7 @@ The endpoint for getting a diff between two standalone configuration versions.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1504,7 +1587,7 @@ The endpoint for disseminating a standalone configuration version to the query-s
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1513,16 +1596,19 @@ The endpoint for disseminating a standalone configuration version to the query-s
     "config": {
         "name": "app_config",
         "organization": "c12s",
-        "version": "v1.0.0"
+        "version": "v1.0.0",
+        "namespace": "dev"
     },
-    "namespace": "dev",
-    "query": [
-        {
-            "labelKey": "newlabel",
-            "shouldBe": ">",
-            "value": "20.0"
-        }
-    ]
+    "strategy": {
+        "name": "default",
+        "query": [
+            {
+                "labelKey": "newlabel",
+                "shouldBe": ">",
+                "value": "20.0"
+            }
+        ]
+    }
 }
 ```
 | property | type | description |
@@ -1530,11 +1616,13 @@ The endpoint for disseminating a standalone configuration version to the query-s
 | `config.organization`    | string  | Name of the organization that is the owner of the configuration as well as nodes for dissemination. |
 | `config.name`    | string  | Configuration name. |
 | `config.version`    | string  | Configuration version. |
-| `namespace`    | string | Namespace in which the configuration will be visible. |
-| `query` | array of objects | A label-based query selector. For a node to match a query, all selectors must be true. |
-| `query.labelKey` | string | Key of the label to compare. |
-| `query.shouldBe` | string | The omparison operator. Supported operators are: =, !=, <, >. |
-| `query.value` | string | Value that should be compared to the label value. |
+| `config.namespace`    | string | Namespace in which the configuration will be visible. |
+| `strategy.name` | string | Placement strategy. Supported values: `default` (direct delivery to matched nodes), `gossip` (requires `percentage`). |
+| `strategy.percentage` | int | Required for the `gossip` strategy. Percentage of matched nodes that should receive the configuration. |
+| `strategy.query` | array of objects | A label-based query selector. For a node to match a query, all selectors must be true. |
+| `strategy.query.labelKey` | string | Key of the label to compare. |
+| `strategy.query.shouldBe` | string | The omparison operator. Supported operators are: =, !=, <, >. |
+| `strategy.query.value` | string | Value that should be compared to the label value. |
 
 #### Response - 200 OK
 
@@ -1584,7 +1672,7 @@ The endpoint for listing placement task statuses for the specified configuration
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1592,7 +1680,8 @@ The endpoint for listing placement task statuses for the specified configuration
 {
     "name": "app_config",
 	"organization": "c12s",
-	"version": "v1.0.0"
+	"version": "v1.0.0",
+	"namespace": "dev"
 }
 ```
 | property | type | description |
@@ -1600,6 +1689,7 @@ The endpoint for listing placement task statuses for the specified configuration
 | `organization`    | string  | Name of the organization that is the owner of the configuration. |
 | `name`    | string  | Configuration name. |
 | `version`    | string  | Configuration version. |
+| `namespace`    | string | Namespace of the configuration. |
 
 #### Response - 200 OK
 
@@ -1645,7 +1735,7 @@ The endpoint for creating new configuration group version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1736,7 +1826,7 @@ The endpoint for getting a specified configuration group version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1804,7 +1894,7 @@ The endpoint for listing all configuration groups inside an organization.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1869,7 +1959,7 @@ The endpoint for deleting a specified configuration group version.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -1937,7 +2027,7 @@ The endpoint for getting a diff between two configuration group versions.
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -2021,7 +2111,7 @@ The endpoint for disseminating a configuration group version to the query-select
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -2030,16 +2120,19 @@ The endpoint for disseminating a configuration group version to the query-select
     "config": {
         "name": "app_config",
         "organization": "c12s",
-        "version": "v1.0.0"
+        "version": "v1.0.0",
+        "namespace": "dev"
     },
-    "namespace": "dev",
-    "query": [
-        {
-            "labelKey": "newlabel",
-            "shouldBe": ">",
-            "value": "20.0"
-        }
-    ]
+    "strategy": {
+        "name": "default",
+        "query": [
+            {
+                "labelKey": "newlabel",
+                "shouldBe": ">",
+                "value": "20.0"
+            }
+        ]
+    }
 }
 ```
 | property | type | description |
@@ -2047,11 +2140,13 @@ The endpoint for disseminating a configuration group version to the query-select
 | `config.organization`    | string  | Name of the organization that is the owner of the configuration as well as nodes for dissemination. |
 | `config.name`    | string  | Configuration name. |
 | `config.version`    | string  | Configuration version. |
-| `namespace`    | string | Namespace in which the configuration will be visible. |
-| `query` | array of objects | A label-based query selector. For a node to match a query, all selectors must be true. |
-| `query.labelKey` | string | Key of the label to compare. |
-| `query.shouldBe` | string | The omparison operator. Supported operators are: =, !=, <, >. |
-| `query.value` | string | Value that should be compared to the label value. |
+| `config.namespace`    | string | Namespace in which the configuration will be visible. |
+| `strategy.name` | string | Placement strategy. Supported values: `default` (direct delivery to matched nodes), `gossip` (requires `percentage`). |
+| `strategy.percentage` | int | Required for the `gossip` strategy. Percentage of matched nodes that should receive the configuration. |
+| `strategy.query` | array of objects | A label-based query selector. For a node to match a query, all selectors must be true. |
+| `strategy.query.labelKey` | string | Key of the label to compare. |
+| `strategy.query.shouldBe` | string | The omparison operator. Supported operators are: =, !=, <, >. |
+| `strategy.query.value` | string | Value that should be compared to the label value. |
 
 #### Response - 200 OK
 
@@ -2101,7 +2196,7 @@ The endpoint for listing placement task statuses for the specified configuration
 
 #### Request headers
 
- - **Authorization**: User's authentication token received upon login
+ - **Authorization**: Bearer token received upon login (header `Authorization: Bearer <token>`)
 
 #### Request body
 
@@ -2109,7 +2204,8 @@ The endpoint for listing placement task statuses for the specified configuration
 {
     "name": "app_config",
 	"organization": "c12s",
-	"version": "v1.0.0"
+	"version": "v1.0.0",
+	"namespace": "dev"
 }
 ```
 | property | type | description |
@@ -2117,6 +2213,7 @@ The endpoint for listing placement task statuses for the specified configuration
 | `organization`    | string  | Name of the organization that is the owner of the configuration. |
 | `name`    | string  | Configuration name. |
 | `version`    | string  | Configuration version. |
+| `namespace`    | string | Namespace of the configuration. |
 
 #### Response - 200 OK
 
@@ -2156,6 +2253,30 @@ The endpoint for listing placement task statuses for the specified configuration
 
  - Configuration not found.
 
+
+### OS management routes (bootc)
+
+All under `/apis/core/v1`, with `Authorization: Bearer <token>`. JSON field
+names are the proto names as the gateway's grpcurl parser accepts them
+(`snake_case` for gravity, `camelCase` for magnetar/supernova). cockpit is
+the reference client (`cockpit image …`, `cockpit vms …`).
+
+| Method + route | gRPC | Body | Permission |
+|---|---|---|---|
+| `POST /images/update` | Gravity `DisseminateOSImage` | `{"node_id","image_ref","digest","reboot_policy":"immediate"}` (digest `sha256:<64 hex>`; ref without a digest; a short ref like `os/edge-base:v1.1` is completed by the node) | `os.update` on the node or on its org |
+| `GET /images` | Supernova `ListImages` | `{}` | token |
+| `POST /builds` | Supernova `BuildImage` | `{"spec":{"name","tag","containerfile","registry","buildArgs":{}},"context":"<base64 tar.gz>"}` | `image.build\|image\|<name>` |
+| `POST /builds/qcow2` | Supernova `BuildQCOW2` | `{"name","imageRef","targetArch","rootfs"}` | `image.build\|image\|<name>` |
+| `GET /builds`, `GET /builds/{id}` | Supernova `ListJobs`, `GetJob` | — | token |
+| `POST /vms` | Magnetar `SetDesiredVms` | `{"hostId","vms":[{"name","qcow2Url","digest","vcpus","memoryMb"}]}` (the host's complete set; `qcow2Url` may be an artifact name) | `node.put` on the host |
+| `GET /vms/desired`, `GET /vms/status` | Magnetar `GetDesiredVms`, `GetVmStatuses` | `{"hostId"}` | `node.get` on the host |
+| `DELETE /nodes` | Magnetar `DeleteNode` | `{"nodeId"}` | `node.delete` on the node |
+| `GET /schemas/validations` | Quasar `ValidateConfiguration` | `{"schema_details":{"organization","namespace":"default","schemaName":"host-image-spec","version":"v1.0.0"},"configuration":"<fleet spec YAML>"}` | `config.get` on the schema |
+
+`GET /nodes/allocated` (`ListOrgOwnedNodes`) carries each node's
+`osStatus` (phase, booted, rollback deployment) and liveness; the desired
+image comes from Magnetar's `desired_os/<node>`. Policies apply without
+re-login (Apollo mints permissions per request).
 
 ## Example workflow
 

@@ -1,0 +1,30 @@
+[Unit]
+Description=c12s Starometry metrics agent
+Documentation=https://github.com/c12s/starometry
+# star writes /var/lib/c12s/nodeid when it registers; starometry exits until
+# the file exists and systemd restarts it (Restart=always)
+After=network-online.target prometheus-node-exporter.service star.service
+Wants=network-online.target prometheus-node-exporter.service
+
+[Service]
+Type=simple
+# node-exporter on this node; no cAdvisor on bootc nodes (no Docker), so
+# CADVISOR_URL stays unset and starometry reports host metrics only
+Environment=NODE_EXPORTER_URL=127.0.0.1
+Environment=NODE_EXPORTER_PORT=9100
+Environment=APP_PORT=8003
+Environment=GRPC_PORT=50055
+Environment=APP_METRICS_CRON_TIMER=15s
+Environment=APP_METRICS_EXTERNAL_CRON_TIMER=30s
+# NATS_ADDRESS and NODE_ID_DIR_PATH: same files as star.service, same order
+EnvironmentFile=-/usr/lib/c12s/node.env
+EnvironmentFile=-/var/lib/c12s/node.env
+# scraped metrics are written to ./data/ (relative to the working dir)
+StateDirectory=starometry
+WorkingDirectory=/var/lib/starometry
+ExecStart=/usr/local/bin/starometry
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

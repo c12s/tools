@@ -1,0 +1,27 @@
+# VM set for one VM host — apply with:
+#   cockpit vms set --org c12s --host <vm host node id> --spec vms.yaml
+#   cockpit vms list --host <vm host node id>              # desired set + each VM's node id
+#   cockpit vms status --host <vm host node id> --org c12s # observed state + booted OS
+#
+# The host must report run_vms (libvirt + /dev/kvm); cockpit refuses others.
+# This list is the host's complete VM set: missing VMs are created, unlisted
+# ones deleted ('{"vms":[]}' deletes all). The fleet spec (fleet.yaml)
+# declares the same per host, together with the OS images.
+#
+#   qcow2Url  artifact name on the disk registry (the host fetches it from its
+#             DISK_REGISTRY_URL) or a full http URL
+#   digest    the qcow2's sha256 (required here; fleet.yaml looks it up):
+#             curl -s localhost:8081/artifacts/edge-base-v1.0.qcow2/sha256
+#
+# Replace <sha256 of the qcow2> before applying.
+vms:
+  - name: vm-1
+    qcow2Url: edge-base-v1.0.qcow2
+    digest: <sha256 of the qcow2>
+    vcpus: 1
+    memoryMb: 1024
+  - name: vm-2
+    qcow2Url: edge-base-v1.0.qcow2
+    digest: <sha256 of the qcow2>
+    vcpus: 1
+    memoryMb: 1024

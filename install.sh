@@ -1,17 +1,18 @@
-cd ..
+#!/usr/bin/env bash
+# install.sh — clone every repo the compose stack builds into the workspace root
+# (the parent of tools/). Repos that are already there are left alone.
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-# todo: switch to c12s repo
-git clone https://github.com/c12s/kuiper
-git clone https://github.com/c12s/quasar
-git clone https://github.com/c12s/magnetar
-git clone https://github.com/c12s/star
-git clone https://github.com/c12s/apollo
-git clone https://github.com/c12s/oort
-git clone https://github.com/c12s/gravity
-git clone https://github.com/c12s/lunar-gateway
-git clone https://github.com/c12s/cockpit
-git clone https://github.com/c12s/heliosphere
-git clone https://github.com/c12s/starometry
-git clone https://github.com/c12s/protostar
-git clone https://github.com/c12s/meridian
-git clone https://github.com/c12s/pulsar
+repos=(
+  kuiper quasar magnetar star apollo oort gravity lunar-gateway cockpit
+  heliosphere starometry protostar meridian pulsar
+  supernova singularity wormhole
+)
+for repo in "${repos[@]}"; do
+  if [ -d "$repo/.git" ]; then
+    echo "[install] $repo: present, skipped"
+  else
+    git clone "https://github.com/c12s/$repo"
+  fi
+done

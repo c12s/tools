@@ -1,0 +1,22 @@
+# Containerfile.broken — broken OS image for rollback testing
+#
+# Extends a good edge-base image with an always-failing greenboot health
+# check. greenboot-healthcheck.service fails every boot, so the node reboots
+# until GRUB falls back to the previous deployment (automatic rollback).
+#
+# Build (BASE = the good image to break; the build runs on the host's docker
+# daemon, which reaches the registry as localhost:5001):
+#   cockpit image build --name os/edge-base --tag v4.1-broken --context tools/bootc \
+#     --containerfile Containerfile.broken \
+#     --build-arg BASE=localhost:5001/os/edge-base:v4.1 --build-arg OS_VERSION=v4.1-broken --wait
+
+ARG BASE=localhost:5001/os/edge-base:v4.1
+FROM ${BASE}
+
+ARG OS_VERSION=v4.1-broken
+RUN echo "edge-base ${OS_VERSION}" > /usr/share/os-version
+LABEL org.opencontainers.image.version="${OS_VERSION}"
+
+COPY greenboot/99-always-fail.sh /etc/greenboot/check/required.d/99-always-fail.sh
+RUN chmod 0755 /etc/greenboot/check/required.d/99-always-fail.sh && \
+    chcon -t bin_t /etc/greenboot/check/required.d/99-always-fail.sh || true

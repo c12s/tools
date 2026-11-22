@@ -16,4 +16,16 @@
 
 nodeconfig
 
+# local binary installs from install-local.sh (never commit)
+bin/
+
 heliosphere/
+bootc/star
+bootc/starometry
+
+# Local vault keys: created/rewritten by apollo at vault init (also on a bare
+# clone, start.sh seeds an empty file before compose). Never commit.
+vault/api_key.json
+
+# measured test output (written by e2e/*.sh)
+e2e/results/

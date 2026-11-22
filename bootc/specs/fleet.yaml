@@ -1,0 +1,54 @@
+# Fleet spec — apply with:
+#   cockpit image apply --spec fleet.yaml --dry-run    # show the plan
+#   cockpit image apply --spec fleet.yaml              # roll it out
+#
+# Both first send the file to Quasar, which checks it against the
+# host-image-spec schema (host-image-spec.schema.yaml, registered once with
+# cockpit create schema); any violation stops the apply.
+#
+# Declares, for the nodes listed here only, which OS image each runs and, for
+# a VM host, its complete VM set. Nodes not listed are never touched;
+# deleting a node from this file stops managing it (nothing changes on it).
+#
+#   images   named OS images. ref may be short (os/edge-base:v1.1): each node
+#            pulls from its IMAGE_REGISTRY. digest is optional: without it the
+#            tag is resolved to its current digest when you apply.
+#   nodes    id = the node's UUID (cat /var/lib/c12s/nodeid, or
+#            cockpit list nodes allocated --org c12s). image is optional
+#            (absent: OS not managed by this file).
+#   canary   true on at most one node or VM per image group: it is updated
+#            first and must stay healthy for rollout.soak before the others.
+#            A group without a canary is updated all at once.
+#   vms      only on a VM host (run_vms): its complete VM set. Absent: VMs
+#            untouched; []: all deleted. disk is an artifact name on the disk
+#            registry, used only to create the VM; image is the OS the VM runs.
+#            A VM's node id is UUIDv5(host id, VM name), shown by
+#            cockpit vms list --host <host-id>.
+#   rollout  soak (canary stays healthy this long), timeout, poll.
+#
+# Order of apply: VM sets -> claim new VMs -> wave 1 (plain nodes and VMs)
+# -> wave 2 (VM hosts last: a host reboot restarts its VMs).
+#
+# Replace the two <...> ids before applying.
+apiVersion: c12s/os.v1
+kind: HostImageSpec
+metadata:
+  org: c12s
+spec:
+  images:
+    stable:
+      ref: os/edge-base:v1.1
+  nodes:
+    - id: <node id>                 # plain node
+      name: edge-1
+      image: stable
+      canary: true
+    - id: <vm host node id>         # VM host (run_vms)
+      name: vmhost-1
+      image: stable
+      vms:
+        - {name: vm-1, disk: edge-base-v1.0.qcow2, vcpus: 1, memoryMb: 1024, image: stable}
+        - {name: vm-2, disk: edge-base-v1.0.qcow2, vcpus: 1, memoryMb: 1024, image: stable}
+  rollout:
+    soak: 1m
+    timeout: 15m

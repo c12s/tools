@@ -1,0 +1,148 @@
+# Containerfile.bootc — c12s edge node OS image
+#
+# Builds a bootc (bootable container) OS image containing the Star agent,
+# the Starometry metrics agent with node-exporter, their systemd units, and
+# greenboot health checks.
+#
+# Expected build context (tools/bootc/):
+#   node.env          node defaults (control-plane addresses), -> /usr/lib/c12s/
+#   star              prebuilt linux/amd64 star binary
+#                     (cd star && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../tools/bootc/star ./cmd)
+#   starometry        prebuilt linux/amd64 starometry binary (metrics agent)
+#                     (cd starometry && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../tools/bootc/starometry ./cmd)
+#
+# Build through the control plane (Supernova builds, pushes to Zot, returns
+# the digest):
+#   cockpit image build --name os/edge-base --tag v1.0 --context tools/bootc \
+#     --containerfile Containerfile.bootc --build-arg OS_VERSION=v1.0 --wait
+#
+# Build args:
+#   OS_VERSION       stamped into /usr/share/os-version
+#   EXTRA_PACKAGES   optional space-separated dnf packages for this version
+#
+# The provisioning disk is made from the pushed image with
+# `cockpit image build qcow2` (bootc-image-builder).
+
+FROM quay.io/fedora/fedora-bootc:45
+
+# marks this image as a bootc OS image (required by bootc-image-builder
+# and by bootc tooling that discovers OS images in a registry)
+LABEL containers.bootc="1"
+
+# Allow pulling OS images from the HTTP-only Zot registry (Singularity). Address
+# depends on network mode:
+#   192.168.122.1 = libvirt default NAT gateway (wormhole-created VMs)
+#   10.0.2.2      = QEMU user-net gateway (direct qemu tests)
+RUN mkdir -p /etc/containers/registries.conf.d && \
+    printf '[[registry]]\nlocation = "192.168.122.1:5001"\ninsecure = true\n[[registry]]\nlocation = "10.0.2.2:5001"\ninsecure = true\n' \
+      > /etc/containers/registries.conf.d/c12s-registry.conf
+
+# cloud-init: the provisioner injects /var/lib/c12s/node.env
+# and first-boot network config through a NoCloud seed (wormhole libvirt
+# backend, or any external provisioner). The base image does not ship it.
+# greenboot: the health gate — required.d checks run before boot-complete
+# and, on repeated failed boots, the rollback trigger set at
+# ostree-finalize-staged boots the previous deployment (auto-rollback).
+# (greenboot 0.16 on Fedora 45: single package, no greenboot-grub2)
+# libvirt + virt-install + xorriso: only used by nodes that report the
+# run_vms capability (the VM reconciler creates bootc VMs from qcow2
+# artifacts); installed on every node so the capability is discovered from
+# the environment, never configured.
+# NOTE: rpm scriptlets do not run `systemctl preset` during image builds, so
+# the units must be enabled explicitly — otherwise health checks never run
+# and no rollback trigger is ever set.
+# audit: auditd writes audit records (SELinux AVCs, PAM logins) to
+# /var/log/audit/audit.log. Without it the kernel prints every record to the
+# console, which is ttyS0 here, and floods the serial login session.
+# node-exporter: host metrics (CPU, memory, disk, network) that starometry
+# scrapes and serves to the control plane; listens on localhost only.
+RUN dnf -y install cloud-init greenboot xorriso libvirt-daemon-kvm \
+      libvirt-daemon-config-network libvirt-client virt-install qemu-img audit \
+      node-exporter && \
+    dnf clean all && \
+    printf 'ARGS="--web.listen-address=127.0.0.1:9100"\n' > /etc/default/prometheus-node-exporter && \
+    systemctl enable greenboot-healthcheck.service greenboot-set-rollback-trigger.service \
+      auditd.service prometheus-node-exporter.service
+# Keep greenboot's 08_greenboot.cfg GRUB snippet: it is the rollback
+# mechanism (counts boot_counter down, boots default=1 at 0) and resets
+# boot_success=0 every boot. bootc-image-builder installs it into /boot when
+# the disk is created; image updates never touch /boot. Without it, disks built afterwards loop
+# forever on a failing deployment.
+
+# modular libvirt daemons are socket-activated; presets are skipped during
+# image builds, so enable the sockets explicitly
+RUN for unit in virtqemud.socket virtnetworkd.socket virtstoraged.socket \
+      virtnodedevd.socket virtlogd.socket virtproxyd.socket; do \
+      systemctl enable "$unit" 2>/dev/null || true; \
+    done
+
+# serial console for headless operation and boot logging
+RUN mkdir -p /usr/lib/bootc/kargs.d && \
+    printf 'kargs = ["console=ttyS0,115200"]\n' > /usr/lib/bootc/kargs.d/10-console.toml
+
+ARG STAR_BINARY=star
+ARG STAROMETRY_BINARY=starometry
+
+# human-readable OS version marker, stamped per build; used to verify that a
+# bootc switch actually booted the new OS (visible in the VM at
+# /usr/share/os-version and in `cockpit image status` once wired)
+ARG OS_VERSION=v1
+RUN echo "edge-base ${OS_VERSION}" > /usr/share/os-version
+# bootc reports this label as the image version (`bootc status`, and the
+# VERSION column of `cockpit image status`); without it the Fedora base's
+# version (45.YYYYMMDD.N) shows instead
+LABEL org.opencontainers.image.version="${OS_VERSION}"
+
+# optional per-version packages: the visible difference between two builds
+ARG EXTRA_PACKAGES=""
+RUN if [ -n "$EXTRA_PACKAGES" ]; then dnf -y install $EXTRA_PACKAGES && dnf clean all; fi
+
+# --- star agent -------------------------------------------------------------
+COPY ${STAR_BINARY} /usr/local/bin/star
+RUN chmod 0755 /usr/local/bin/star
+
+# --- starometry metrics agent -----------------------------------------------
+# Answers the control plane's NATS request <nodeid>.metrics (protostar polls
+# every node Magnetar knows and feeds Prometheus/Grafana) with node-exporter
+# metrics. Deliberately not a greenboot check: broken metrics must never
+# reboot or roll back a node.
+COPY ${STAROMETRY_BINARY} /usr/local/bin/starometry
+RUN chmod 0755 /usr/local/bin/starometry
+
+# --- node defaults ----------------------------------------------------------
+# Control-plane addresses and agent settings shared by every node. They live
+# in /usr, so every image update delivers them; /var/lib/c12s/node.env (from
+# the cloud-init seed) holds only per-node values and overrides.
+COPY node.env /usr/lib/c12s/node.env
+
+# --- systemd unit -----------------------------------------------------------
+COPY systemd/star.service /usr/lib/systemd/system/star.service
+COPY systemd/starometry.service /usr/lib/systemd/system/starometry.service
+RUN systemctl enable star.service starometry.service
+
+# --- greenboot health checks (required.d: failure => rollback) ---------------
+COPY greenboot/01-star-health.sh /etc/greenboot/check/required.d/01-star-health.sh
+COPY greenboot/02-cp-reachability.sh /etc/greenboot/check/required.d/02-cp-reachability.sh
+RUN chmod 0755 /etc/greenboot/check/required.d/*.sh && \
+    chcon -t bin_t /etc/greenboot/check/required.d/*.sh || true
+# Two boot attempts: one retry for a transient failure, then roll back.
+# Every attempt is a full reboot, which is slow on nested VMs.
+RUN sed -i 's/^GREENBOOT_MAX_BOOT_ATTEMPTS=.*/GREENBOOT_MAX_BOOT_ATTEMPTS=2/' /etc/greenboot/greenboot.conf && \
+    grep -q '^GREENBOOT_MAX_BOOT_ATTEMPTS=2$' /etc/greenboot/greenboot.conf
+
+# --- node state dir ----------------------------------------------------------
+# /var/lib/c12s persists across every bootc switch and rollback; on first
+# boot the node creates nodeid there, cloud-init (or the provisioner) may
+# drop node.env for the control plane addresses.
+# /var/lib/star holds VM-reconciler state (qcow2 cache, per-VM disks); it must
+# be traversable by the qemu user (0755) for virt-install to work.
+# Declared through tmpfiles.d, not created in the image: bootc unpacks image
+# /var content only at install time, never on an update.
+RUN printf 'd /var/lib/c12s 0755 root root -\nd /var/lib/star 0755 root root -\n' \
+      > /usr/lib/tmpfiles.d/c12s.conf
+
+# --- persistent journal -------------------------------------------------------
+# Default Storage=auto stays volatile without /var/log/journal, so star's log
+# from before a reboot or rollback is lost exactly when it is needed.
+RUN mkdir -p /usr/lib/systemd/journald.conf.d && \
+    printf '[Journal]\nStorage=persistent\n' > /usr/lib/systemd/journald.conf.d/10-c12s-persistent.conf
